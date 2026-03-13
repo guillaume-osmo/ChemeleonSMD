@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chemeleon-smd"
+version = "0.1.0"
+description = "SCORE MLX Distilled CheMeleon molecular fingerprints for Apple Silicon"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Guillaume Godin"},
+]
+keywords = ["chemistry", "molecular-fingerprints", "gnn", "mlx", "apple-silicon"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Chemistry",
+]
+dependencies = [
+    "mlx>=0.22.0",
+    "mlx-graphs>=0.1.0",
+    "numpy>=1.24.0",
+    "rdkit",
+]
+
+[project.optional-dependencies]
+convert = ["torch>=2.0.0"]
+
+[project.urls]
+Homepage = "https://github.com/guillaume-osmo/ChemeleonSMD"
+
+[tool.setuptools.packages.find]
+include = ["chemeleon_smd*"]
+
+[tool.setuptools.package-data]
+chemeleon_smd = ["weights/*.npz", "weights/*.json"]
