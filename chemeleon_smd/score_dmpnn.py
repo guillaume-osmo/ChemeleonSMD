@@ -12,6 +12,8 @@ SCORE-DMPNN uses 1 layer applied for 6 steps with Euler skip connections:
 The MolAttFP readout replaces Set2Set (lighter, same dim as input).
 """
 
+from typing import Optional
+
 import mlx.core as mx
 import mlx.nn as nn
 from mlx_graphs.utils import scatter
@@ -32,6 +34,7 @@ class ScoreDMPNN(nn.Module):
         d_e: int = 14,
         d_h: int = 2048,
         n_steps: int = 6,
+        depth: Optional[int] = None,
         skip_alpha: float = 0.5,
         dropout: float = 0.0,
     ):
@@ -39,7 +42,7 @@ class ScoreDMPNN(nn.Module):
         self.d_v = d_v
         self.d_e = d_e
         self.d_h = d_h
-        self.n_steps = n_steps
+        self.n_steps = int(depth if depth is not None else n_steps)
 
         # Single message passing layer
         self.W_i = nn.Linear(d_v + d_e, d_h, bias=False)
@@ -56,6 +59,10 @@ class ScoreDMPNN(nn.Module):
     @property
     def output_dim(self) -> int:
         return self.d_h
+
+    @property
+    def depth(self) -> int:
+        return self.n_steps
 
     def __call__(
         self,
@@ -166,3 +173,29 @@ class MolAttFPReadout(nn.Module):
             mol_feature = nn.leaky_relu(self._gru_step(mol_feature, mol_context))
 
         return mol_feature
+
+
+def load_teacher_dmpnn(
+    weights_path: Optional[str] = None,
+    config_path: Optional[str] = None,
+):
+    """Load the pretrained CheMeleon teacher from bundled MLX weights."""
+    from chemeleon_smd import convert_weights
+
+    return convert_weights.load_teacher(weights_path=weights_path, config_path=config_path)
+
+
+def init_student_from_teacher(teacher, skip_alpha: float = 0.0) -> ScoreDMPNN:
+    """Initialize a ScoreDMPNN from the teacher's exact weights."""
+    student = ScoreDMPNN(
+        d_v=teacher.d_v,
+        d_e=teacher.d_e,
+        d_h=teacher.d_h,
+        depth=teacher.depth,
+        skip_alpha=skip_alpha,
+    )
+    student.W_i.weight = teacher.W_i.weight
+    student.W_h.weight = teacher.W_h.weight
+    student.W_o.weight = teacher.W_o.weight
+    student.W_o.bias = teacher.W_o.bias
+    return student

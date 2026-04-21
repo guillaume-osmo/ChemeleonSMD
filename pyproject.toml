@@ -30,6 +30,9 @@ dependencies = [
 
 [project.optional-dependencies]
 convert = ["torch>=2.0.0"]
+demo = ["pandas>=2.0.0"]
+training = ["mordred>=1.2.0", "pandas>=2.0.0"]
+all = ["torch>=2.0.0", "pandas>=2.0.0", "mordred>=1.2.0"]
 
 [project.urls]
 Homepage = "https://github.com/guillaume-osmo/ChemeleonSMD"

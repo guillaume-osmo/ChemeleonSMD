@@ -8,7 +8,7 @@ Usage:
     PYTHONPATH=. python finetuning_demo.py
 """
 
-import os
+from collections import defaultdict, deque
 from pathlib import Path
 
 import mlx.core as mx
@@ -20,11 +20,11 @@ from mlx.utils import tree_flatten
 from mlx_graphs.utils import scatter
 
 from chemeleon_smd import convert_weights
-from chemeleon_smd import mol_featurizer as mf
+from chemeleon_smd import graph_cache
 from chemeleon_smd import score_dmpnn
-from chemeleon_smd.mpnn import CheMeleonBondMPNN
 
 WEIGHTS_DIR = Path(__file__).parent / "chemeleon_smd" / "weights"
+GRAPH_CACHE_DIR = WEIGHTS_DIR / "graph_cache_lipophilicity"
 
 
 class MPNN_FFN(nn.Module):
@@ -47,28 +47,45 @@ class MPNN_FFN(nn.Module):
         return self.ffn2(h).reshape(-1)
 
 
-def featurize_batch(smiles_list):
-    graphs, valid_idx = [], []
-    for i, smi in enumerate(smiles_list):
-        g = mf.featurize_smiles(smi)
-        if g is not None and g.V.shape[0] > 0 and g.E.shape[0] > 0:
-            graphs.append(g)
-            valid_idx.append(i)
-    if not graphs:
-        return None
-    V, E, ei, rev, batch_arr, ng = mf.collate_mol_graphs(graphs)
-    return (
-        mx.array(V),
-        mx.array(E),
-        mx.array(ei.astype(np.int32)),
-        mx.array(rev.astype(np.int32)),
-        mx.array(batch_arr.astype(np.int32)),
-        ng,
-        valid_idx,
-    )
+def align_smiles_to_cache(source_smiles, cached_smiles):
+    positions = defaultdict(deque)
+    for idx, smi in enumerate(source_smiles):
+        positions[str(smi)].append(idx)
+
+    aligned = []
+    for smi in cached_smiles:
+        if not positions[smi]:
+            raise ValueError(f"Could not align cached SMILES back to targets: {smi}")
+        aligned.append(positions[smi].popleft())
+    return np.array(aligned, dtype=np.int64)
 
 
-def train_and_eval(model_name, model, smiles, targets, train_idx, val_idx, test_idx,
+def iter_supervised_batches(
+    cache: graph_cache.MolGraphCache,
+    targets: np.ndarray,
+    indices: np.ndarray,
+    batch_size: int,
+    shuffle: bool,
+    seed: int | None = None,
+):
+    for batch in cache.iter_batches_from_indices(
+        indices,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        seed=seed,
+    ):
+        yield (
+            mx.array(batch.V),
+            mx.array(batch.E),
+            mx.array(batch.edge_index.astype(np.int32, copy=False)),
+            mx.array(batch.rev_edge_index.astype(np.int32, copy=False)),
+            mx.array(batch.batch.astype(np.int32, copy=False)),
+            batch.num_graphs,
+            mx.array(targets[batch.graph_indices]),
+        )
+
+
+def train_and_eval(model_name, model, cache, targets, train_idx, val_idx, test_idx,
                    epochs=20, lr=1e-3, batch_size=16):
     """Train an FFN model and return test RMSE + MAE."""
     optimizer = optim.Adam(learning_rate=lr)
@@ -84,20 +101,14 @@ def train_and_eval(model_name, model, smiles, targets, train_idx, val_idx, test_
 
     for epoch in range(1, epochs + 1):
         model.train()
-        perm = np.random.permutation(len(train_idx))
-
-        for bstart in range(0, len(perm), batch_size):
-            bidx = perm[bstart : bstart + batch_size]
-            mol_idx = train_idx[bidx]
-            batch_smi = [smiles[i] for i in mol_idx]
-            batch_y = targets[mol_idx]
-
-            result = featurize_batch(batch_smi)
-            if result is None:
-                continue
-            V, E, ei, rev, batch_arr, ng, valid = result
-            y = mx.array(batch_y[valid])
-
+        for V, E, ei, rev, batch_arr, ng, y in iter_supervised_batches(
+            cache,
+            targets,
+            train_idx,
+            batch_size=batch_size,
+            shuffle=True,
+            seed=epoch,
+        ):
             loss, grads = loss_and_grad(model, V, E, ei, rev, batch_arr, ng, y)
             optimizer.update(model, grads)
             mx.eval(model.parameters(), optimizer.state)
@@ -105,19 +116,17 @@ def train_and_eval(model_name, model, smiles, targets, train_idx, val_idx, test_
         # Validation
         model.eval()
         val_preds, val_true = [], []
-        for bstart in range(0, len(val_idx), batch_size):
-            bidx = val_idx[bstart : bstart + batch_size]
-            batch_smi = [smiles[i] for i in bidx]
-            batch_y = targets[bidx]
-
-            result = featurize_batch(batch_smi)
-            if result is None:
-                continue
-            V, E, ei, rev, batch_arr, ng, valid = result
+        for V, E, ei, rev, batch_arr, ng, y in iter_supervised_batches(
+            cache,
+            targets,
+            val_idx,
+            batch_size=batch_size,
+            shuffle=False,
+        ):
             pred = model(V, E, ei, rev, batch_arr, ng)
             mx.eval(pred)
             val_preds.extend(np.array(pred).tolist())
-            val_true.extend(batch_y[valid].tolist())
+            val_true.extend(np.array(y).tolist())
 
         val_rmse = np.sqrt(np.mean((np.array(val_preds) - np.array(val_true)) ** 2))
         if val_rmse < best_val:
@@ -130,19 +139,17 @@ def train_and_eval(model_name, model, smiles, targets, train_idx, val_idx, test_
     model.eval()
 
     test_preds, test_true = [], []
-    for bstart in range(0, len(test_idx), batch_size):
-        bidx = test_idx[bstart : bstart + batch_size]
-        batch_smi = [smiles[i] for i in bidx]
-        batch_y = targets[bidx]
-
-        result = featurize_batch(batch_smi)
-        if result is None:
-            continue
-        V, E, ei, rev, batch_arr, ng, valid = result
+    for V, E, ei, rev, batch_arr, ng, y in iter_supervised_batches(
+        cache,
+        targets,
+        test_idx,
+        batch_size=batch_size,
+        shuffle=False,
+    ):
         pred = model(V, E, ei, rev, batch_arr, ng)
         mx.eval(pred)
         test_preds.extend(np.array(pred).tolist())
-        test_true.extend(batch_y[valid].tolist())
+        test_true.extend(np.array(y).tolist())
 
     test_preds = np.array(test_preds)
     test_true = np.array(test_true)
@@ -169,8 +176,24 @@ def main():
     )
     smiles = df["smiles"].values
     targets = df["exp"].values.astype(np.float32)
-    n = len(smiles)
-    print(f"  {n} molecules, target: lipophilicity (exp)")
+    print(f"  {len(smiles)} molecules, target: lipophilicity (exp)")
+
+    mol_graph_cache = graph_cache.load_or_build_graph_cache(
+        smiles.tolist(),
+        str(GRAPH_CACHE_DIR),
+        log=print,
+    )
+    cached_smiles = mol_graph_cache.get_smiles()
+    if mol_graph_cache.n_graphs != len(smiles):
+        keep_idx = align_smiles_to_cache(smiles.tolist(), cached_smiles)
+        smiles = np.array(cached_smiles)
+        targets = targets[keep_idx]
+        print(f"  Graph cache kept {len(smiles)} valid molecules")
+    else:
+        smiles = np.array(cached_smiles)
+        print(f"  Graph cache reused all {len(smiles)} molecules")
+
+    n = mol_graph_cache.n_graphs
 
     # Random split 80/10/10 (same as CheMeleon demo)
     rng = np.random.RandomState(0)
@@ -195,7 +218,7 @@ def main():
     teacher.eval()
     model = MPNN_FFN(teacher, hidden_dim=300, freeze_backbone=True)
     rmse, mae = train_and_eval(
-        "CheMeleon (frozen)", model, smiles, targets_norm,
+        "CheMeleon (frozen)", model, mol_graph_cache, targets_norm,
         train_idx, val_idx, test_idx, epochs=20, lr=1e-3,
     )
     results.append(("CheMeleon teacher (frozen)", rmse * train_std, mae * train_std))
@@ -205,7 +228,7 @@ def main():
     teacher2 = convert_weights.load_teacher()
     model = MPNN_FFN(teacher2, hidden_dim=300, freeze_backbone=False)
     rmse, mae = train_and_eval(
-        "CheMeleon (finetuned)", model, smiles, targets_norm,
+        "CheMeleon (finetuned)", model, mol_graph_cache, targets_norm,
         train_idx, val_idx, test_idx, epochs=20, lr=1e-4,
     )
     results.append(("CheMeleon teacher (finetuned)", rmse * train_std, mae * train_std))
@@ -221,7 +244,7 @@ def main():
         backbone.eval()
         model = MPNN_FFN(backbone, hidden_dim=300, freeze_backbone=True)
         rmse, mae = train_and_eval(
-            f"SCORE {version} (frozen)", model, smiles, targets_norm,
+            f"SCORE {version} (frozen)", model, mol_graph_cache, targets_norm,
             train_idx, val_idx, test_idx, epochs=20, lr=1e-3,
         )
         results.append((f"SCORE-DMPNN {version} (frozen)", rmse * train_std, mae * train_std))
@@ -236,7 +259,7 @@ def main():
         backbone.load_weights(list(mx.load(str(w_path)).items()))
         model = MPNN_FFN(backbone, hidden_dim=300, freeze_backbone=False)
         rmse, mae = train_and_eval(
-            f"SCORE {version} (finetuned)", model, smiles, targets_norm,
+            f"SCORE {version} (finetuned)", model, mol_graph_cache, targets_norm,
             train_idx, val_idx, test_idx, epochs=20, lr=1e-4,
         )
         results.append((f"SCORE-DMPNN {version} (finetuned)", rmse * train_std, mae * train_std))

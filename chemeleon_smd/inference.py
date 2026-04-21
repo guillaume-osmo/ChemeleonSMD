@@ -23,7 +23,8 @@ def load_model(
     If no weights_path is given, looks for the bundled v3 weights, then v2.
     """
     global _CACHED_MODEL
-    if _CACHED_MODEL is not None and weights_path is None:
+    requested_default = weights_path is None
+    if _CACHED_MODEL is not None and requested_default:
         return _CACHED_MODEL
 
     if weights_path is None:
@@ -51,7 +52,7 @@ def load_model(
     model.load_weights(weights)
     model.eval()
 
-    if weights_path is None:
+    if requested_default:
         _CACHED_MODEL = model
 
     return model

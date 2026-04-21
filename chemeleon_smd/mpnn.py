@@ -79,3 +79,57 @@ class CheMeleonBondMPNN(nn.Module):
             output = self.dropout(output)
 
         return output
+
+
+class Set2SetReadout(nn.Module):
+    """Set2Set graph-level readout producing 2 * input_dim representations."""
+
+    def __init__(self, input_dim: int, n_iters: int = 6):
+        super().__init__()
+        self.input_dim = input_dim
+        self.n_iters = n_iters
+        self.output_dim = 2 * input_dim
+        self.lstm_W_i = nn.Linear(2 * input_dim, 4 * input_dim)
+        self.lstm_W_h = nn.Linear(input_dim, 4 * input_dim, bias=False)
+
+    def _lstm_step(
+        self,
+        x: mx.array,
+        h: mx.array,
+        c: mx.array,
+    ) -> tuple[mx.array, mx.array]:
+        d_h = self.input_dim
+        gates = self.lstm_W_i(x) + self.lstm_W_h(h)
+        i = mx.sigmoid(gates[:, :d_h])
+        f = mx.sigmoid(gates[:, d_h : 2 * d_h])
+        g = mx.tanh(gates[:, 2 * d_h : 3 * d_h])
+        o = mx.sigmoid(gates[:, 3 * d_h :])
+        c_new = f * c + i * g
+        h_new = o * mx.tanh(c_new)
+        return h_new, c_new
+
+    def __call__(
+        self,
+        node_features: mx.array,
+        batch: mx.array,
+        num_graphs: int,
+    ) -> mx.array:
+        d_h = self.input_dim
+        h = mx.zeros((num_graphs, d_h))
+        c = mx.zeros((num_graphs, d_h))
+        q_star = mx.zeros((num_graphs, 2 * d_h))
+
+        for _ in range(self.n_iters):
+            h, c = self._lstm_step(q_star, h, c)
+            query_per_node = h[batch]
+            scores = mx.sum(query_per_node * node_features, axis=-1)
+            alpha = scatter(scores, batch, out_size=num_graphs, aggr="softmax")
+            readout = scatter(
+                mx.expand_dims(alpha, -1) * node_features,
+                batch,
+                out_size=num_graphs,
+                aggr="add",
+            )
+            q_star = mx.concatenate([h, readout], axis=-1)
+
+        return q_star
