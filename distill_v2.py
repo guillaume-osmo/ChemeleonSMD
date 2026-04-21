@@ -11,8 +11,8 @@ import mlx.nn as nn
 import mlx.optimizers as optim
 import numpy as np
 from mlx.utils import tree_flatten
-from mlx_graphs.utils import scatter
 
+from chemeleon_smd._graph_ops import scatter
 from chemeleon_smd import graph_cache
 from chemeleon_smd import score_dmpnn
 

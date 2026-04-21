@@ -16,7 +16,8 @@ from typing import Optional
 
 import mlx.core as mx
 import mlx.nn as nn
-from mlx_graphs.utils import scatter
+
+from chemeleon_smd._graph_ops import scatter
 
 
 class ScoreDMPNN(nn.Module):

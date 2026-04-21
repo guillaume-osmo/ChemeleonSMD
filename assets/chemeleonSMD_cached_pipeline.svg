@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="980" viewBox="0 0 1600 980" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1140" viewBox="0 0 1600 1140" role="img" aria-labelledby="title desc">
   <title id="title">ChemeleonSMD Cached Pipeline</title>
-  <desc id="desc">Diagram showing the cached MLX pipeline for graph pretraining and teacher to student distillation.</desc>
+  <desc id="desc">Diagram showing the cached MLX pipeline for teacher-to-student distillation, descriptor pretraining, and downstream finetuning.</desc>
   <defs>
     <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#f7fbff"/>
@@ -37,11 +37,11 @@
     </style>
   </defs>
 
-  <rect width="1600" height="980" fill="url(#bg)"/>
-  <rect x="42" y="38" width="1516" height="904" rx="34" fill="#ffffff" opacity="0.72"/>
+  <rect width="1600" height="1140" fill="url(#bg)"/>
+  <rect x="42" y="38" width="1516" height="1064" rx="34" fill="#ffffff" opacity="0.72"/>
 
-  <text x="80" y="100" class="title">ChemeleonSMD: cached pretraining and distillation pipeline</text>
-  <text x="80" y="132" class="subtitle">Chemistry runs once, caches land on disk, and MLX trains from aligned arrays instead of re-featurizing every epoch.</text>
+  <text x="80" y="100" class="title">ChemeleonSMD: cached distillation, pretraining, and finetuning</text>
+  <text x="80" y="132" class="subtitle">Chemistry runs once, caches land on disk, and MLX trains or finetunes from aligned arrays instead of re-featurizing every epoch.</text>
 
   <rect x="80" y="180" width="270" height="150" rx="26" fill="#edf4ff" stroke="#9dbcf7" stroke-width="2" filter="url(#shadow)"/>
   <text x="110" y="240" class="boxTitle">1. Input molecules</text>
@@ -134,8 +134,19 @@
   <rect x="1310" y="696" width="112" height="24" rx="12" fill="url(#titleGrad)"/>
   <text x="1366" y="713" text-anchor="middle" class="pill">OUTPUT</text>
 
+  <text x="1065" y="904" class="section">Downstream finetuning</text>
+
+  <rect x="1065" y="930" width="430" height="150" rx="28" fill="#fff2ea" stroke="#f0bb92" stroke-width="2" filter="url(#shadow)"/>
+  <text x="1099" y="980" class="boxTitle">`finetuning_demo.py`</text>
+  <text x="1099" y="1012" class="boxText">Cached lipophilicity demo:</text>
+  <text x="1099" y="1036" class="boxText">load SCORE weights, reuse graph shards,</text>
+  <text x="1099" y="1060" class="boxText">and fit a regression head without re-featurizing</text>
+  <rect x="1339" y="944" width="130" height="24" rx="12" fill="#c47f00"/>
+  <text x="1404" y="961" text-anchor="middle" class="pill">FINETUNE DEMO</text>
+
   <path d="M480 767 C520 767, 550 767, 590 767" fill="none" stroke="#c47f00" stroke-width="5" marker-end="url(#arrowGold)"/>
   <path d="M1010 767 C1048 767, 1082 767, 1120 767" fill="none" stroke="#178f87" stroke-width="5" marker-end="url(#arrowTeal)"/>
+  <path d="M1280 852 C1280 878, 1280 900, 1280 930" fill="none" stroke="#2f6fed" stroke-width="5" marker-end="url(#arrowBlue)"/>
 
   <path d="M580 330 C520 348, 360 362, 275 438" fill="none" stroke="#2f6fed" stroke-width="4" stroke-dasharray="10 8" marker-end="url(#arrowBlue)"/>
   <path d="M580 330 C780 340, 1180 340, 1540 360 C1540 520, 1540 620, 800 682" fill="none" stroke="#178f87" stroke-width="4" stroke-dasharray="10 8" marker-end="url(#arrowTeal)"/>
@@ -146,5 +157,5 @@
   <text x="1008" y="620" class="label2">cached graphs feed descriptor pretraining</text>
   <text x="998" y="372" class="label3">teacher fingerprints become reusable targets</text>
   <text x="132" y="606" class="label3">molecule features stay separate from graph shards</text>
-  <text x="1510" y="948" text-anchor="end" class="credit">SMD by Guillaume Godin</text>
+  <text x="1510" y="1102" text-anchor="end" class="credit">SMD by Guillaume Godin</text>
 </svg>

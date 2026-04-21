@@ -23,7 +23,6 @@ classifiers = [
 ]
 dependencies = [
     "mlx>=0.22.0",
-    "mlx-graphs>=0.1.0",
     "numpy>=1.24.0",
     "rdkit",
 ]

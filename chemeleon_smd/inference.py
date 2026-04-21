@@ -5,8 +5,8 @@ from typing import List, Literal, Optional, Union
 
 import mlx.core as mx
 import numpy as np
-from mlx_graphs.utils import scatter
 
+from chemeleon_smd._graph_ops import scatter
 from chemeleon_smd import mol_featurizer as mf
 from chemeleon_smd import score_dmpnn
 

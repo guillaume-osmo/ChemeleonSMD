@@ -4,8 +4,8 @@ from typing import Literal
 
 import mlx.core as mx
 import mlx.nn as nn
-from mlx_graphs.utils import scatter
 
+from chemeleon_smd._graph_ops import scatter
 from chemeleon_smd import layers
 from chemeleon_smd import mpnn
 

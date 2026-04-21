@@ -11,3 +11,4 @@ env/
 venv/
 *.so
 .DS_Store
+chemeleon_smd/weights/graph_cache_*/

@@ -1,5 +1,4 @@
 mlx>=0.22.0
-mlx-graphs>=0.1.0
 numpy>=1.22.0,<2.0.0
 pandas>=2.0.0
 rdkit

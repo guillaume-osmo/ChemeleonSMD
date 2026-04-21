@@ -1,6 +1,6 @@
 # ChemeleonSMD
 
-**SCORE MLX Distilled** CheMeleon molecular fingerprints for Apple Silicon, with cached MLX distillation and descriptor pretraining flows.
+**SCORE MLX Distilled** CheMeleon molecular fingerprints for Apple Silicon, with cached MLX distillation, descriptor pretraining, and finetuning flows.
 
 Here, **SMD** stands for **SCORE MLX Distilled**.
 
@@ -14,14 +14,18 @@ ChemeleonSMD distills the [CheMeleon](https://zenodo.org/records/15460715) pretr
 - **Apple Silicon native** — runs on MLX, no CUDA required
 - **Contractive SCORE dynamics** — Euler skip connection (`alpha=0.5`) gives stable recurrent message passing
 - **ChemProp-compatible** featurization (72-dim atoms, 14-dim bonds)
-- **Cached graph training pipeline** — distillation and pretraining can reuse sharded graph tensors across epochs and reruns
-- **Separate sidecar feature caches** — Mordred or other molecule-level features stay aligned without being mixed into the graph cache
+- **Cached graph training pipeline** — distillation, pretraining, and finetuning can reuse sharded graph tensors across epochs and reruns
+- **Separate sidecar feature caches** — Osmordred or other molecule-level features stay aligned without being mixed into the graph cache
 
 ## Installation
 
 ```bash
 git clone https://github.com/guillaume-osmo/ChemeleonSMD.git
 cd ChemeleonSMD
+
+# Recommended for this repo: use the local sibling mlx-graphs checkout,
+# not the older PyPI mlx-graphs build
+pip install -e ../mlx-graphs
 
 # Fetch the model weights (stored with Git LFS)
 git lfs install
@@ -38,6 +42,8 @@ pip install -e ".[training]"
 ```
 
 > **Note:** The `.npz` weight files are stored with [Git LFS](https://git-lfs.com/). If you cloned without LFS installed, the weight files will be small pointer files. Run `git lfs install && git lfs pull` to download the actual weights.
+
+> **Local graph stack:** development and benchmarking in this repo are intended to run against the local sibling `../mlx-graphs` checkout. If that editable install is already present, `pip install -e .` and `pip install -e ".[demo]"` will reuse it instead of pulling the older PyPI package.
 
 ## Quick Start
 
@@ -70,7 +76,7 @@ This cache is intentionally graph-only. It does **not** automatically store arbi
 
 If we use extra molecule-level features, we cache those separately as aligned sidecar arrays:
 
-- `pretrain_score.py --mordred-cache` caches Mordred descriptor matrices in `.npz`
+- `pretrain_score.py --mordred-cache` caches Osmordred descriptor matrices in `.npz`
 - `distill_score_dmpnn.py` saves cached teacher fingerprints in `teacher_fps_*.npz`
 - `distill_v2.py` and `distill_v3.py` save the distilled training sets they build as `fingerprints + smiles` `.npz` files
 
@@ -82,7 +88,7 @@ So yes, we can add molecular features too. The clean pattern is:
 
 That separation keeps the graph cache reusable across different objectives.
 
-## Training Scripts
+## Training And Demo Scripts
 
 ### `distill_score_dmpnn.py`
 
@@ -118,7 +124,7 @@ So yes: **v3 is cached**.
 
 Descriptor pretraining script, **not** a finetuning script.
 
-- computes Mordred descriptor targets
+- computes Osmordred descriptor targets
 - caches those descriptor targets with `--mordred-cache`
 - builds or reuses the molecular graph cache
 - trains SCORE to predict masked descriptors from cached graph batches
@@ -126,6 +132,8 @@ Descriptor pretraining script, **not** a finetuning script.
 ### `finetuning_demo.py`
 
 Lipophilicity demo using the bundled weights.
+
+This is the downstream cached finetuning stage shown in the pipeline diagram.
 
 The demo now also reuses a persistent graph cache instead of re-running RDKit featurization every batch.
 
@@ -186,6 +194,18 @@ Finetuning on MoleculeNet [Lipophilicity](https://moleculenet.org/) with a 2-lay
 | **SCORE-DMPNN v4 (finetuned)** | **0.518** | **0.380** |
 | SCORE-DMPNN v6 (finetuned) | 0.519 | 0.385 |
 
+![ChemeleonSMD benchmark summary](assets/chemeleonSMD_benchmark_summary.svg)
+
+The figure above shows the current run's downstream lipophilicity **test** metrics only.
+
+A controlled MLX memory probe on one cached 64-graph finetuning batch showed:
+
+- CheMeleon teacher peak memory: `1556 MB`
+- SCORE-DMPNN v4 peak memory: `1683 MB`
+- SCORE-DMPNN v6 peak memory: `1683 MB`
+
+So the teacher is **not** intrinsically heavier in this controlled path. If it looks bigger earlier in the full demo, that is more likely first-model execution or allocator behavior than model size.
+
 ## Weight Conversion
 
 To convert from the original PyTorch CheMeleon checkpoint:
@@ -223,6 +243,7 @@ distill_v3.py               # Cached scaffold-diverse hard-mining refinement
 pretrain_score.py           # Cached descriptor pretraining
 finetuning_demo.py          # Cached lipophilicity demo
 assets/
+├── chemeleonSMD_benchmark_summary.svg
 └── chemeleonSMD_cached_pipeline.svg
 ```
 

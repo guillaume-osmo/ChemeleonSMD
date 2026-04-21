@@ -21,7 +21,8 @@ The difference with SCORE-DMPNN is in the forward dynamics:
 
 import mlx.core as mx
 import mlx.nn as nn
-from mlx_graphs.utils import scatter
+
+from chemeleon_smd._graph_ops import scatter
 
 
 class CheMeleonBondMPNN(nn.Module):
