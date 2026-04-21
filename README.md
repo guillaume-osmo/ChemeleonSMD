@@ -2,7 +2,9 @@
 
 **SCORE MLX Distilled** CheMeleon molecular fingerprints for Apple Silicon, with cached MLX distillation and descriptor pretraining flows.
 
-![Cached CheMeleon MLX pipeline](assets/chemeleon_mlx_cached_pipeline.svg)
+Here, **SMD** stands for **SCORE MLX Distilled**.
+
+![Cached ChemeleonSMD pipeline](assets/chemeleonSMD_cached_pipeline.svg)
 
 ChemeleonSMD distills the [CheMeleon](https://zenodo.org/records/15460715) pretrained Directed Message Passing Neural Network (DMPNN) into a [SCORE](https://arxiv.org/abs/2603.10544)-style architecture running natively on [MLX](https://github.com/ml-explore/mlx). The public repo now includes the reusable graph-cache infrastructure used to remove repeated RDKit featurization from distillation, descriptor pretraining, and finetuning loops.
 
@@ -221,7 +223,7 @@ distill_v3.py               # Cached scaffold-diverse hard-mining refinement
 pretrain_score.py           # Cached descriptor pretraining
 finetuning_demo.py          # Cached lipophilicity demo
 assets/
-└── chemeleon_mlx_cached_pipeline.svg
+└── chemeleonSMD_cached_pipeline.svg
 ```
 
 ## License

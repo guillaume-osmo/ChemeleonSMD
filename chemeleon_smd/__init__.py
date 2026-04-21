@@ -1,5 +1,7 @@
 """ChemeleonSMD: SCORE MLX Distilled CheMeleon molecular fingerprints.
 
+SMD stands for SCORE MLX Distilled.
+
 A lightweight, Apple-Silicon-native molecular fingerprinting model based on
 CheMeleon's Directed Message Passing Neural Network (DMPNN), distilled into
 a SCORE-style architecture running on MLX.
