@@ -62,7 +62,7 @@ def align_smiles_to_cache(source_smiles, cached_smiles):
 
 def iter_supervised_batches(
     cache: graph_cache.MolGraphCache,
-    targets: np.ndarray,
+    targets: mx.array,
     indices: np.ndarray,
     batch_size: int,
     shuffle: bool,
@@ -75,13 +75,13 @@ def iter_supervised_batches(
         seed=seed,
     ):
         yield (
-            mx.array(batch.V),
-            mx.array(batch.E),
-            mx.array(batch.edge_index.astype(np.int32, copy=False)),
-            mx.array(batch.rev_edge_index.astype(np.int32, copy=False)),
-            mx.array(batch.batch.astype(np.int32, copy=False)),
+            batch.V,
+            batch.E,
+            batch.edge_index,
+            batch.rev_edge_index,
+            batch.batch,
             batch.num_graphs,
-            mx.array(targets[batch.graph_indices]),
+            targets[batch.graph_indices],
         )
 
 
@@ -223,6 +223,7 @@ def main():
     train_mean = targets[train_idx].mean()
     train_std = targets[train_idx].std()
     targets_norm = (targets - train_mean) / train_std
+    targets_norm_mx = mx.array(targets_norm)
 
     results = []
 
@@ -232,7 +233,7 @@ def main():
     teacher.eval()
     model = MPNN_FFN(teacher, hidden_dim=300, freeze_backbone=True)
     metrics = train_and_eval(
-        "CheMeleon (frozen)", model, mol_graph_cache, targets_norm,
+        "CheMeleon (frozen)", model, mol_graph_cache, targets_norm_mx,
         train_idx, val_idx, test_idx, epochs=20, lr=1e-3,
     )
     results.append((
@@ -248,7 +249,7 @@ def main():
     teacher2 = convert_weights.load_teacher()
     model = MPNN_FFN(teacher2, hidden_dim=300, freeze_backbone=False)
     metrics = train_and_eval(
-        "CheMeleon (finetuned)", model, mol_graph_cache, targets_norm,
+        "CheMeleon (finetuned)", model, mol_graph_cache, targets_norm_mx,
         train_idx, val_idx, test_idx, epochs=20, lr=1e-4,
     )
     results.append((
@@ -270,7 +271,7 @@ def main():
         backbone.eval()
         model = MPNN_FFN(backbone, hidden_dim=300, freeze_backbone=True)
         metrics = train_and_eval(
-            f"SCORE {version} (frozen)", model, mol_graph_cache, targets_norm,
+            f"SCORE {version} (frozen)", model, mol_graph_cache, targets_norm_mx,
             train_idx, val_idx, test_idx, epochs=20, lr=1e-3,
         )
         results.append((
@@ -291,7 +292,7 @@ def main():
         backbone.load_weights(list(mx.load(str(w_path)).items()))
         model = MPNN_FFN(backbone, hidden_dim=300, freeze_backbone=False)
         metrics = train_and_eval(
-            f"SCORE {version} (finetuned)", model, mol_graph_cache, targets_norm,
+            f"SCORE {version} (finetuned)", model, mol_graph_cache, targets_norm_mx,
             train_idx, val_idx, test_idx, epochs=20, lr=1e-4,
         )
         results.append((

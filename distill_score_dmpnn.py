@@ -36,11 +36,11 @@ def read_smiles_file(smiles_file: str) -> list[str]:
 
 def graph_batch_to_mx(batch: graph_cache.CachedMolGraphBatch):
     return (
-        mx.array(batch.V),
-        mx.array(batch.E),
-        mx.array(batch.edge_index.astype(np.int32, copy=False)),
-        mx.array(batch.rev_edge_index.astype(np.int32, copy=False)),
-        mx.array(batch.batch.astype(np.int32, copy=False)),
+        batch.V,
+        batch.E,
+        batch.edge_index,
+        batch.rev_edge_index,
+        batch.batch,
         batch.num_graphs,
     )
 
@@ -115,6 +115,7 @@ def distill(
 
     data = np.load(teacher_fps_path, allow_pickle=True)
     teacher_fps = data["fingerprints"]
+    teacher_fps_mx = mx.array(teacher_fps)
     cached_smiles = data["smiles"].astype(str).tolist()
     if cache.n_graphs != teacher_fps.shape[0]:
         raise ValueError(
@@ -165,7 +166,7 @@ def distill(
             seed=seed + epoch,
         ):
             V, E, ei, rev, batch_arr, ng = graph_batch_to_mx(batch)
-            target_fp = mx.array(teacher_fps[batch.graph_indices])
+            target_fp = teacher_fps_mx[batch.graph_indices]
             loss, grads = loss_and_grad(student, V, E, ei, rev, batch_arr, ng, target_fp)
             optimizer.update(student, grads)
             mx.eval(student.parameters(), optimizer.state)
@@ -183,7 +184,7 @@ def distill(
             shuffle=False,
         ):
             V, E, ei, rev, batch_arr, ng = graph_batch_to_mx(batch)
-            target_fp = mx.array(teacher_fps[batch.graph_indices])
+            target_fp = teacher_fps_mx[batch.graph_indices]
             student_fp = get_fingerprints(student, V, E, ei, rev, batch_arr, ng)
             val_loss_sum += mx.mean((student_fp - target_fp) ** 2).item()
             val_batches += 1

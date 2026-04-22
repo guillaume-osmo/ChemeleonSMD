@@ -2,7 +2,7 @@
 
 The goal is to pay the RDKit/featurization cost once, then reuse cached graph
 arrays across epochs and reruns. The cache stores valid molecular graphs in
-shards of concatenated NumPy arrays and reconstructs batched graphs on demand.
+shards on disk, then reconstructs MLX-native graph batches on demand.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterator, Sequence
 
+import mlx.core as mx
 import numpy as np
 
 from chemeleon_smd import mol_featurizer as mf
@@ -43,13 +44,25 @@ def _is_valid_graph(graph: mf.MolGraphData | None) -> bool:
 
 @dataclass(frozen=True)
 class CachedMolGraphBatch:
-    V: np.ndarray
-    E: np.ndarray
-    edge_index: np.ndarray
-    rev_edge_index: np.ndarray
-    batch: np.ndarray
+    V: mx.array
+    E: mx.array
+    edge_index: mx.array
+    rev_edge_index: mx.array
+    batch: mx.array
     num_graphs: int
-    graph_indices: np.ndarray
+    graph_indices: mx.array
+    smiles: list[str]
+
+
+@dataclass(frozen=True)
+class _LoadedShard:
+    V: mx.array
+    E: mx.array
+    edge_src: mx.array
+    edge_dst: mx.array
+    rev_edge_index: mx.array
+    atom_offsets: np.ndarray
+    edge_offsets: np.ndarray
     smiles: list[str]
 
 
@@ -148,14 +161,14 @@ class MolGraphCache:
         grouped = self._group_indices_by_shard(indices_arr, rng=rng)
 
         for shard_id, local_indices in grouped:
-            with np.load(self._shard_files[shard_id], allow_pickle=False) as shard:
-                for start in range(0, len(local_indices), batch_size):
-                    chunk = local_indices[start : start + batch_size]
-                    yield self._collate_batch(
-                        shard=shard,
-                        shard_id=shard_id,
-                        local_indices=chunk,
-                    )
+            shard = self._load_shard(self._shard_files[shard_id])
+            for start in range(0, len(local_indices), batch_size):
+                chunk = local_indices[start : start + batch_size]
+                yield self._collate_batch(
+                    shard=shard,
+                    shard_id=shard_id,
+                    local_indices=chunk,
+                )
 
     def _group_indices_by_shard(
         self,
@@ -183,19 +196,10 @@ class MolGraphCache:
 
     def _collate_batch(
         self,
-        shard: np.lib.npyio.NpzFile,
+        shard: _LoadedShard,
         shard_id: int,
         local_indices: np.ndarray,
     ) -> CachedMolGraphBatch:
-        V_all = shard["V"]
-        E_all = shard["E"]
-        edge_src_all = shard["edge_src"]
-        edge_dst_all = shard["edge_dst"]
-        rev_all = shard["rev_edge_index"]
-        atom_offsets = shard["atom_offsets"]
-        edge_offsets = shard["edge_offsets"]
-        shard_smiles = shard["smiles"].astype(str)
-
         V_parts = []
         E_parts = []
         src_parts = []
@@ -208,30 +212,29 @@ class MolGraphCache:
         edge_offset = 0
 
         for batch_pos, local_idx in enumerate(local_indices.tolist()):
-            a0 = int(atom_offsets[local_idx])
-            a1 = int(atom_offsets[local_idx + 1])
-            e0 = int(edge_offsets[local_idx])
-            e1 = int(edge_offsets[local_idx + 1])
+            a0 = int(shard.atom_offsets[local_idx])
+            a1 = int(shard.atom_offsets[local_idx + 1])
+            e0 = int(shard.edge_offsets[local_idx])
+            e1 = int(shard.edge_offsets[local_idx + 1])
 
-            V_parts.append(V_all[a0:a1])
-            E_parts.append(E_all[e0:e1])
-            src_parts.append(edge_src_all[e0:e1] + atom_offset)
-            dst_parts.append(edge_dst_all[e0:e1] + atom_offset)
-            rev_parts.append(rev_all[e0:e1] + edge_offset)
-            batch_parts.append(np.full(a1 - a0, batch_pos, dtype=np.int32))
-            smiles.append(str(shard_smiles[local_idx]))
+            V_parts.append(shard.V[a0:a1])
+            E_parts.append(shard.E[e0:e1])
+            src_parts.append(shard.edge_src[e0:e1] + atom_offset)
+            dst_parts.append(shard.edge_dst[e0:e1] + atom_offset)
+            rev_parts.append(shard.rev_edge_index[e0:e1] + edge_offset)
+            batch_parts.append(mx.full((a1 - a0,), batch_pos, dtype=mx.int32))
+            smiles.append(shard.smiles[local_idx])
 
             atom_offset += a1 - a0
             edge_offset += e1 - e0
 
-        V = np.concatenate(V_parts, axis=0)
-        E = np.concatenate(E_parts, axis=0)
-        edge_index = np.stack(
-            [np.concatenate(src_parts), np.concatenate(dst_parts)],
-            axis=0,
-        )
-        rev_edge_index = np.concatenate(rev_parts)
-        batch = np.concatenate(batch_parts)
+        V = _concat_or_single(V_parts, axis=0)
+        E = _concat_or_single(E_parts, axis=0)
+        edge_src = _concat_or_single(src_parts, axis=0)
+        edge_dst = _concat_or_single(dst_parts, axis=0)
+        edge_index = mx.stack([edge_src, edge_dst], axis=0)
+        rev_edge_index = _concat_or_single(rev_parts, axis=0)
+        batch = _concat_or_single(batch_parts, axis=0)
         global_indices = self._shard_starts[shard_id] + local_indices
 
         return CachedMolGraphBatch(
@@ -241,9 +244,30 @@ class MolGraphCache:
             rev_edge_index=rev_edge_index,
             batch=batch,
             num_graphs=len(local_indices),
-            graph_indices=global_indices.astype(np.int64, copy=False),
+            graph_indices=mx.array(global_indices.astype(np.int32, copy=False)),
             smiles=smiles,
         )
+
+    def _load_shard(self, shard_file: Path) -> _LoadedShard:
+        with np.load(shard_file, allow_pickle=False) as shard:
+            return _LoadedShard(
+                V=mx.array(shard["V"].astype(np.float32, copy=False)),
+                E=mx.array(shard["E"].astype(np.float32, copy=False)),
+                edge_src=mx.array(shard["edge_src"].astype(np.int32, copy=False)),
+                edge_dst=mx.array(shard["edge_dst"].astype(np.int32, copy=False)),
+                rev_edge_index=mx.array(
+                    shard["rev_edge_index"].astype(np.int32, copy=False)
+                ),
+                atom_offsets=shard["atom_offsets"].astype(np.int64, copy=False),
+                edge_offsets=shard["edge_offsets"].astype(np.int64, copy=False),
+                smiles=shard["smiles"].astype(str).tolist(),
+            )
+
+
+def _concat_or_single(parts: list[mx.array], axis: int = 0) -> mx.array:
+    if len(parts) == 1:
+        return parts[0]
+    return mx.concatenate(parts, axis=axis)
 
 
 def load_or_build_graph_cache(

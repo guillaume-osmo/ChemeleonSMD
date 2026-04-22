@@ -212,14 +212,19 @@ class GraphBatcher:
             shuffle=self.shuffle,
             seed=batch_seed,
         ):
+            if isinstance(self.descriptors, mx.array):
+                descriptor_batch = self.descriptors[batch.graph_indices]
+            else:
+                graph_indices_np = np.array(batch.graph_indices, dtype=np.int64)
+                descriptor_batch = mx.array(self.descriptors[graph_indices_np])
             yield (
-                mx.array(batch.V),
-                mx.array(batch.E),
-                mx.array(batch.edge_index.astype(np.int32, copy=False)),
-                mx.array(batch.rev_edge_index.astype(np.int32, copy=False)),
-                mx.array(batch.batch.astype(np.int32, copy=False)),
+                batch.V,
+                batch.E,
+                batch.edge_index,
+                batch.rev_edge_index,
+                batch.batch,
                 batch.num_graphs,
-                mx.array(self.descriptors[batch.graph_indices]),
+                descriptor_batch,
             )
 
 
